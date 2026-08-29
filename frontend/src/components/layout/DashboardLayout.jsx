@@ -12,6 +12,7 @@ import {
   HiCalendar, HiLightBulb, HiDownload, HiExternalLink, HiDesktopComputer
 } from 'react-icons/hi';
 import { HiBuildingOffice2 } from 'react-icons/hi2';
+import { getMediaUrl } from '../../utils/imageUrl';
 
 const getNavItems = (role, basePath) => {
   if (role === 'CANDIDATE') return [
@@ -121,7 +122,7 @@ export default function DashboardLayout() {
         <div className="px-4 py-4 border-b border-dark-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary-700 flex items-center justify-center flex-shrink-0 overflow-hidden">
-              {user?.profileImage ? <img src={user.profileImage} alt={user.name} className="w-full h-full object-cover" /> : <span className="text-white font-semibold text-sm">{user?.name?.[0]?.toUpperCase()}</span>}
+              {user?.profileImage ? <img src={getMediaUrl(user.profileImage)} alt={user.name} className="w-full h-full object-cover" /> : <span className="text-white font-semibold text-sm">{user?.name?.[0]?.toUpperCase()}</span>}
             </div>
             <div className="min-w-0">
               <p className="text-gray-900 dark:text-white text-sm font-semibold truncate">{user?.name}</p>

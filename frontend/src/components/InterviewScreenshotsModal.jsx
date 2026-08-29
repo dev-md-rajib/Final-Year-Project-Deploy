@@ -12,14 +12,7 @@ import {
 import toast from 'react-hot-toast';
 import api from '../services/api';
 
-const getImageUrl = (url) => {
-  if (!url) return '';
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
-    return url;
-  }
-  const cleanPath = url.startsWith('/') ? url : `/${url}`;
-  return cleanPath;
-};
+import { getMediaUrl } from '../utils/imageUrl';
 
 export default function InterviewScreenshotsModal({ interview, onClose }) {
   const [loading, setLoading] = useState(true);
@@ -166,7 +159,7 @@ export default function InterviewScreenshotsModal({ interview, onClose }) {
                     {/* Thumbnail Image */}
                     <div className="relative aspect-video bg-black overflow-hidden flex items-center justify-center">
                       <img
-                        src={getImageUrl(item.imageUrl)}
+                        src={getMediaUrl(item.imageUrl)}
                         alt={`Capture ${idx + 1}`}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         loading="lazy"
@@ -233,7 +226,7 @@ export default function InterviewScreenshotsModal({ interview, onClose }) {
         >
           <div className="absolute top-4 right-4 flex items-center gap-3 z-10" onClick={(e) => e.stopPropagation()}>
             <a
-              href={getImageUrl(lightboxImg.imageUrl)}
+              href={getMediaUrl(lightboxImg.imageUrl)}
               download="screenshot.jpg"
               target="_blank"
               rel="noopener noreferrer"
@@ -254,7 +247,7 @@ export default function InterviewScreenshotsModal({ interview, onClose }) {
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={getImageUrl(lightboxImg.imageUrl)}
+              src={getMediaUrl(lightboxImg.imageUrl)}
               alt="Screenshot full size"
               className="max-w-full max-h-[75vh] object-contain rounded-xl border border-dark-border shadow-2xl"
             />

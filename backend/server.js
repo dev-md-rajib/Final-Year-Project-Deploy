@@ -48,15 +48,13 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
 const app = express();
 
+const { corsOptions } = require('./src/config/cors');
+
 // Security headers
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
 // CORS
-app.use(cors({
-  origin: [process.env.CLIENT_URL || 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-}));
+app.use(cors(corsOptions));
 
 // Rate limiting (disabled for multiplayer polling)
 // const limiter = rateLimit({

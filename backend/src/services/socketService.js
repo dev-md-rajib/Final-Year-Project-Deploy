@@ -3,12 +3,14 @@ const jwt = require('jsonwebtoken');
 const TrackerSession = require('../models/TrackerSession');
 const logger = require('../config/logger');
 
+const { originValidator } = require('../config/cors');
+
 let io = null;
 
 function initSocket(httpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: [process.env.CLIENT_URL || 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
+      origin: originValidator,
       credentials: true,
       methods: ['GET', 'POST'],
     },

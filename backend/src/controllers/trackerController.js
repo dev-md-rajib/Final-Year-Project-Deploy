@@ -27,6 +27,8 @@ const getNextInterview = async (req, res, next) => {
       status: { $in: ['scheduled', 'active', 'pending'] },
     }).sort({ scheduledAt: 1 });
 
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+
     if (teamInterview) {
       return res.status(200).json({
         interviewId: String(teamInterview._id),
@@ -35,7 +37,7 @@ const getNextInterview = async (req, res, next) => {
         stack: teamInterview.stack,
         level: `Level ${teamInterview.level}`,
         scheduledAt: teamInterview.scheduledAt ? teamInterview.scheduledAt.toISOString() : new Date().toISOString(),
-        interviewUrl: `${process.env.CLIENT_URL || 'http://localhost:5173'}/candidate/interview/team`,
+        interviewUrl: `${clientUrl}/candidate/interview/team`,
       });
     }
 
@@ -53,7 +55,7 @@ const getNextInterview = async (req, res, next) => {
         stack: standardInterview.stack,
         level: `Level ${standardInterview.level}`,
         scheduledAt: standardInterview.startedAt ? standardInterview.startedAt.toISOString() : new Date().toISOString(),
-        interviewUrl: `${process.env.CLIENT_URL || 'http://localhost:5173'}/candidate/interview/${standardInterview._id}`,
+        interviewUrl: `${clientUrl}/candidate/interview/${standardInterview._id}`,
       });
     }
 
@@ -71,7 +73,7 @@ const getNextInterview = async (req, res, next) => {
         stack: aiInterview.stack,
         level: `Level ${aiInterview.level}`,
         scheduledAt: aiInterview.startedAt ? aiInterview.startedAt.toISOString() : new Date().toISOString(),
-        interviewUrl: `${process.env.CLIENT_URL || 'http://localhost:5173'}/candidate/interview/ai-agent/${aiInterview._id}`,
+        interviewUrl: `${clientUrl}/candidate/interview/ai-agent/${aiInterview._id}`,
       });
     }
 
@@ -83,7 +85,7 @@ const getNextInterview = async (req, res, next) => {
       stack: 'General Assessment',
       level: 'Level 1',
       scheduledAt: new Date().toISOString(),
-      interviewUrl: `${process.env.CLIENT_URL || 'http://localhost:5173'}/candidate/interview`,
+      interviewUrl: `${clientUrl}/candidate/interview`,
     });
   } catch (err) {
     next(err);
