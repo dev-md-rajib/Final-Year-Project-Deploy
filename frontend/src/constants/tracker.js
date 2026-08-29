@@ -3,4 +3,4 @@
  */
 export const TRACKER_DOWNLOAD_URL =
   import.meta.env.VITE_TRACKER_DOWNLOAD_URL ||
-  'https://drive.google.com/drive/folders/17lB8vKiqwG3oEw24Vp9zK8_demo_tracker_download';
+  'https://drive.google.com/file/d/17sx3Y5HYVW8X5n5_n9PXWX64SnCZX0dG/view';
