@@ -10,7 +10,7 @@ const PASS_THRESHOLD = 50; // score >= 50 = passed
 const COOLDOWN_DAYS = 0;
 
 // ─────────────────────────────────────────────
-// Helper: find the earliest available interviewer with a 30-min rest gap
+// Helper: find the earliest available interviewer with a rest gap
 // ─────────────────────────────────────────────
 function formatBangladeshDateTime(date) {
   if (!date) return '';
@@ -59,7 +59,7 @@ async function safeCreateMeeting({ topic, startTime, durationMinutes = 60, agend
   return generateInAppMeetingData(topic, startTime, candidateName);
 }
 
-async function findEarliestAvailableInterviewer(stack, excludeIds = [], interviewType = null, preferredTime = null) {
+async function findEarliestAvailableInterviewer(stack, excludeIds = [], interviewType = null) {
   const stackIsSector = (interviewType === 'business') || isSector(stack);
   const escapedStack = stack ? stack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
   const stackRegex = new RegExp(`^${escapedStack}$`, 'i');
@@ -114,62 +114,9 @@ async function findEarliestAvailableInterviewer(stack, excludeIds = [], intervie
   ];
 
   const now = new Date();
+  const minStartTime = new Date(now.getTime() + 1 * 60 * 1000); // minimum 1 min buffer from now
   const INTERVIEW_DURATION_MS = 60 * 60 * 1000; // 60 minutes
   const BUFFER_MS = 1 * 60 * 1000; // 1 minute cooldown/gap time between interviews
-
-  // 1. If candidate passed a valid preferredDateTime, first try to match that specific time slot
-  if (preferredTime) {
-    const prefDate = new Date(preferredTime);
-    if (!isNaN(prefDate.getTime()) && prefDate > new Date(now.getTime() + 1 * 60 * 1000)) {
-      const prefBdMs = prefDate.getTime() + 6 * 60 * 60 * 1000;
-      const prefBdDateObj = new Date(prefBdMs);
-      const prefBdDay = prefBdDateObj.getUTCDay();
-      const prefBdHour = prefBdDateObj.getUTCHours();
-      const prefBdMinute = prefBdDateObj.getUTCMinutes();
-      const prefTimeStr = `${String(prefBdHour).padStart(2, '0')}:${String(prefBdMinute).padStart(2, '0')}`;
-      const prefEndTimeStr = `${String(prefBdHour + 1).padStart(2, '0')}:${String(prefBdMinute).padStart(2, '0')}`;
-
-      for (const interviewer of interviewers) {
-        const configuredSlots = interviewer.interviewerProfile?.availabilitySlots || [];
-        const slots = configuredSlots.length > 0 ? configuredSlots : defaultSlots;
-
-        const matchingSlot = slots.find((s) => {
-          if (s.dayOfWeek !== prefBdDay) return false;
-          return prefTimeStr >= s.startTime && prefEndTimeStr <= s.endTime;
-        });
-
-        if (matchingSlot) {
-          const cStart = prefDate.getTime();
-          const cEnd = cStart + INTERVIEW_DURATION_MS;
-
-          const hasConflict = await TeamInterview.findOne({
-            interviewer: interviewer._id,
-            status: { $in: ['pending', 'scheduled', 'active'] },
-            $or: [
-              {
-                scheduledAt: {
-                  $lt: new Date(cEnd + BUFFER_MS),
-                  $gt: new Date(cStart - INTERVIEW_DURATION_MS - BUFFER_MS),
-                },
-              },
-            ],
-          });
-
-          if (!hasConflict) {
-            return {
-              interviewer,
-              scheduledAt: prefDate,
-            };
-          }
-        }
-      }
-    }
-  }
-
-  // 2. Otherwise auto-schedule for the earliest available slot in verified interviewers' schedules
-  const minStartTime = preferredTime && new Date(preferredTime) > now
-    ? new Date(preferredTime)
-    : new Date(now.getTime() + 1 * 60 * 1000);
 
   let earliestMatch = null;
 
@@ -329,7 +276,7 @@ const checkEligibility = async (req, res, next) => {
 const requestInterview = async (req, res, next) => {
   try {
     const candidateId = req.user._id;
-    const { stack, level, interviewType, preferredDateTime } = req.body;
+    const { stack, level, interviewType } = req.body;
 
     if (!stack || !level) {
       return res.status(400).json({ success: false, message: 'stack/sector and level are required' });
@@ -361,13 +308,13 @@ const requestInterview = async (req, res, next) => {
     const interviewMode = (interviewType === 'business' || isSector(stack)) ? 'business' : 'technical';
     const sector = interviewMode === 'business' ? stack : null;
 
-    // Search and match verified interviewer at their specified time
-    const match = await findEarliestAvailableInterviewer(stack, [], interviewType, preferredDateTime);
+    // Search and auto-match the earliest available slot with gap
+    const match = await findEarliestAvailableInterviewer(stack, [], interviewType);
 
     if (!match) {
       return res.status(200).json({
         success: true,
-        message: 'No verified interviewer is currently available for this stack/domain in the upcoming schedule. Please check back later or choose another stack.',
+        message: 'No interviewer is currently available for this stack/domain in the upcoming schedule. Please check back later or choose another stack.',
         noInterviewer: true,
       });
     }
@@ -393,7 +340,7 @@ const requestInterview = async (req, res, next) => {
       sector,
       interviewMode,
       level: parseInt(level),
-      preferredDateTime: preferredDateTime ? new Date(preferredDateTime) : scheduledAt,
+      preferredDateTime: scheduledAt,
       scheduledAt,
       status: 'scheduled',
       zoomMeetingId: meetingData.meetingId,
@@ -446,7 +393,6 @@ const requestInterview = async (req, res, next) => {
   }
 };
 
-
 // ─────────────────────────────────────────────
 // @desc  Get candidate's own team interviews
 // @route GET /api/team-interviews/my
@@ -481,12 +427,8 @@ const cancelInterview = async (req, res, next) => {
     }
 
     // Delete Zoom meeting if exists
-    if (interview.zoomMeetingId && !interview.zoomMeetingId.startsWith('INAPP-')) {
-      try {
-        await deleteMeeting(interview.zoomMeetingId);
-      } catch {
-        // ignore
-      }
+    if (interview.zoomMeetingId) {
+      await deleteMeeting(interview.zoomMeetingId);
     }
 
     // Apply 7-day cooldown to candidate
@@ -640,10 +582,7 @@ const declineInterview = async (req, res, next) => {
         },
       });
 
-      return res.json({
-        success: true,
-        message: `Interview reassigned to ${replacement.name} for ${bdReassignedTime}.`,
-      });
+      return res.json({ success: true, message: 'Interview declined and reassigned to another available interviewer.', reassigned: true });
     }
 
     // No replacement found — cancel the interview
@@ -651,7 +590,7 @@ const declineInterview = async (req, res, next) => {
       try {
         await deleteMeeting(interview.zoomMeetingId);
       } catch {
-        // ignore
+        // ignore cleanup error
       }
     }
 
@@ -682,7 +621,10 @@ const declineInterview = async (req, res, next) => {
 const submitResult = async (req, res, next) => {
   try {
     const user = await User.findById(req.user._id);
-    if (!user?.isVerified) {
+    if (!user || user.isBanned) {
+      return res.status(403).json({ success: false, message: 'Account suspended or invalid.' });
+    }
+    if (!user.isVerified) {
       return res.status(403).json({ success: false, message: 'You must be verified by an Admin to submit interview results.' });
     }
 
