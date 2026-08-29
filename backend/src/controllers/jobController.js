@@ -1,0 +1,396 @@
+const Job = require('../models/Job');
+const Application = require('../models/Application');
+const CandidateProfile = require('../models/CandidateProfile');
+const Interview = require('../models/Interview');
+const AiAgentInterview = require('../models/AiAgentInterview');
+const TeamInterview = require('../models/TeamInterview');
+
+// @desc    Create a job
+// @route   POST /api/jobs
+// @access  Private (RECRUITER)
+const createJob = async (req, res, next) => {
+  try {
+    const job = await Job.create({ ...req.body, recruiter: req.user._id });
+    res.status(201).json({ success: true, job });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get all open jobs
+// @route   GET /api/jobs
+// @access  Private
+const getJobs = async (req, res, next) => {
+  try {
+    const { stack, level, remote, sector, page = 1, limit = 20 } = req.query;
+    const query = { status: 'Open' };
+    
+    if (stack || level) {
+      query.requirements = { $elemMatch: {} };
+      if (stack) query.requirements.$elemMatch.stack = new RegExp(stack, 'i');
+      if (level) query.requirements.$elemMatch.level = parseInt(level);
+    }
+    
+    if (sector) query.sector = sector;
+    if (remote !== undefined) query.isRemote = remote === 'true';
+
+    const skip = (page - 1) * limit;
+    const [jobs, total] = await Promise.all([
+      Job.find(query).populate('recruiter', 'name profileImage email recruiterProfile isVerified').sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
+      Job.countDocuments(query),
+    ]);
+
+    res.status(200).json({ success: true, total, page: parseInt(page), jobs });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get job by ID
+// @route   GET /api/jobs/:id
+// @access  Private
+const getJob = async (req, res, next) => {
+  try {
+    const job = await Job.findById(req.params.id).populate('recruiter', 'name profileImage email recruiterProfile isVerified');
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    res.status(200).json({ success: true, job });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Update job
+// @route   PUT /api/jobs/:id
+// @access  Private (RECRUITER - own job)
+const updateJob = async (req, res, next) => {
+  try {
+    let job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.recruiter.toString() !== req.user._id.toString() && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    job = await Job.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    res.status(200).json({ success: true, job });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Delete job
+// @route   DELETE /api/jobs/:id
+// @access  Private (RECRUITER - own job or ADMIN)
+const deleteJob = async (req, res, next) => {
+  try {
+    const job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.recruiter.toString() !== req.user._id.toString() && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    await job.deleteOne();
+    res.status(200).json({ success: true, message: 'Job deleted' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get recruiter's own jobs
+// @route   GET /api/jobs/my
+// @access  Private (RECRUITER)
+const getMyJobs = async (req, res, next) => {
+  try {
+    const jobs = await Job.find({ recruiter: req.user._id }).sort({ createdAt: -1 });
+    res.status(200).json({ success: true, count: jobs.length, jobs });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Apply to a job
+// @route   POST /api/jobs/:id/apply
+// @access  Private (CANDIDATE)
+const applyToJob = async (req, res, next) => {
+  try {
+    const job = await Job.findById(req.params.id);
+    if (!job || job.status !== 'Open') {
+      return res.status(404).json({ success: false, message: 'Job not available' });
+    }
+
+    // Check eligibility logic for multi-stack requirements
+    let missingRequirements = [];
+    let requirementScores = []; // Keep track of best scores for match calculation
+
+    if (job.requirements && job.requirements.length > 0) {
+      for (const reqObj of job.requirements) {
+        const stackRegex = new RegExp(`^${reqObj.stack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        const minLevel = Number(reqObj.level) || 1;
+        const minScore = Number(reqObj.minScore) || 0;
+
+        const query = {
+          candidate: req.user._id,
+          $or: [{ stack: stackRegex }, { sector: stackRegex }],
+          level: { $gte: minLevel },
+          status: 'completed',
+          passed: true,
+          totalScore: { $gte: minScore },
+        };
+
+        let stdBest = null;
+        let aiBest = null;
+        let humanBest = null;
+
+        if (reqObj.method !== 'AI' && reqObj.method !== 'Human') {
+          stdBest = await Interview.findOne(query).sort({ totalScore: -1 });
+        }
+        if (reqObj.method !== 'Standard' && reqObj.method !== 'Human') {
+          aiBest = await AiAgentInterview.findOne(query).sort({ totalScore: -1 });
+        }
+        if (reqObj.method !== 'Standard' && reqObj.method !== 'AI') {
+          const humanQuery = {
+            candidate: req.user._id,
+            $or: [{ stack: stackRegex }, { sector: stackRegex }],
+            level: { $gte: minLevel },
+            status: 'completed',
+            passed: true,
+            interviewerScore: { $gte: minScore },
+          };
+          const foundHuman = await TeamInterview.findOne(humanQuery).sort({ interviewerScore: -1 });
+          if (foundHuman) {
+            humanBest = {
+              ...foundHuman.toObject(),
+              totalScore: foundHuman.interviewerScore,
+            };
+          }
+        }
+
+        const validCandidates = [stdBest, aiBest, humanBest].filter(Boolean);
+        let bestInterview = null;
+        if (validCandidates.length > 0) {
+          validCandidates.sort((a, b) => b.totalScore - a.totalScore);
+          bestInterview = validCandidates[0];
+        }
+
+        if (!bestInterview) {
+          const methodText =
+            reqObj.method === 'Standard'
+              ? ' (Standard Interview)'
+              : reqObj.method === 'AI'
+              ? ' (AI Agent)'
+              : reqObj.method === 'Human'
+              ? ' (Human Interview)'
+              : '';
+          missingRequirements.push(`${reqObj.stack}${methodText} (Level ${reqObj.level}+, ${reqObj.minScore}%+)`);
+        } else {
+          requirementScores.push(bestInterview.totalScore);
+        }
+      }
+    }
+
+    if (missingRequirements.length > 0) {
+      return res.status(403).json({
+        success: false,
+        message: `You do not meet all requirements. Missing passed interviews for: ${missingRequirements.join(', ')}`,
+      });
+    }
+
+    // Calculate match score
+    const profile = await CandidateProfile.findOne({ user: req.user._id });
+    let matchScore = 0;
+    
+    if (profile) {
+      const candidateStacks = profile.expertise.map((e) => e.toLowerCase());
+      
+      let skillMatchPct = 100; // Default if no requirements
+      let scoreComponent = 0;
+      
+      if (job.requirements && job.requirements.length > 0) {
+        const requiredStacks = job.requirements.map(req => req.stack.toLowerCase());
+        const matched = requiredStacks.filter((s) => candidateStacks.includes(s));
+        skillMatchPct = (matched.length / requiredStacks.length) * 40;
+        
+        const avgScore = requirementScores.reduce((sum, val) => sum + val, 0) / requirementScores.length;
+        scoreComponent = (avgScore / 100) * 40;
+      } else {
+        scoreComponent = 40; // Max score component if job has zero interview requirements
+        skillMatchPct = 40; 
+      }
+
+      const expComponent = Math.min(profile.yearsOfExperience / Math.max(job.experienceRequired, 1), 1) * 20;
+      matchScore = Math.round(skillMatchPct + scoreComponent + expComponent);
+    }
+
+    const application = await Application.create({
+      candidate: req.user._id,
+      job: job._id,
+      matchScore,
+      coverLetter: req.body.coverLetter || '',
+    });
+
+    await Job.findByIdAndUpdate(job._id, { $inc: { applicationCount: 1 } });
+
+    res.status(201).json({ success: true, application });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(409).json({ success: false, message: 'You have already applied to this job' });
+    }
+    next(err);
+  }
+};
+
+// @desc    Get my applications (candidate)
+// @route   GET /api/jobs/applications/my
+// @access  Private (CANDIDATE)
+const getMyApplications = async (req, res, next) => {
+  try {
+    const applications = await Application.find({ candidate: req.user._id })
+      .populate('job', 'title requiredStack requiredLevel isRemote location status recruiter')
+      .populate({ path: 'job', populate: { path: 'recruiter', select: 'name profileImage' } })
+      .sort({ createdAt: -1 });
+    res.status(200).json({ success: true, applications });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get applications for a job (recruiter)
+// @route   GET /api/jobs/:id/applications
+// @access  Private (RECRUITER)
+const getJobApplications = async (req, res, next) => {
+  try {
+    const job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.recruiter.toString() !== req.user._id.toString() && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const { status, sortBy = 'matchScore', order = 'desc' } = req.query;
+    const query = { job: req.params.id };
+    if (status) query.status = status;
+
+    const applications = await Application.find(query)
+      .populate('candidate', 'name email profileImage')
+      .sort({ [sortBy]: order === 'asc' ? 1 : -1 });
+
+    res.status(200).json({ success: true, count: applications.length, applications });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Update application status (recruiter)
+// @route   PUT /api/jobs/applications/:appId/status
+// @access  Private (RECRUITER)
+const updateApplicationStatus = async (req, res, next) => {
+  try {
+    const { status, recruiterNote } = req.body;
+    const validStatuses = ['Applied', 'Shortlisted', 'Rejected', 'Hired'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+
+    const application = await Application.findByIdAndUpdate(
+      req.params.appId,
+      { status, recruiterNote },
+      { new: true }
+    ).populate('job candidate');
+
+    if (!application) return res.status(404).json({ success: false, message: 'Application not found' });
+
+    res.status(200).json({ success: true, application });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get matched unapplied jobs count for candidate
+// @route   GET /api/jobs/matched-count
+// @access  Private (CANDIDATE)
+const getMatchedJobsCount = async (req, res, next) => {
+  try {
+    // 1. Get IDs of jobs candidate already applied to
+    const appliedJobIds = await Application.find({ candidate: req.user._id }).distinct('job');
+    
+    // 2. Fetch all currently open jobs excluding ones already applied to
+    const openJobs = await Job.find({ 
+      status: 'Open',
+      _id: { $nin: appliedJobIds }
+    });
+
+    if (!openJobs.length) {
+      return res.status(200).json({ success: true, count: 0 });
+    }
+
+    // 3. Pre-fetch all passed interviews for this candidate
+    const passedStd = await Interview.find({
+      candidate: req.user._id,
+      status: 'completed',
+      passed: true
+    }).select('stack sector level totalScore');
+
+    const passedAi = await AiAgentInterview.find({
+      candidate: req.user._id,
+      status: 'completed',
+      passed: true
+    }).select('stack sector level totalScore');
+
+    const passedHumanRaw = await TeamInterview.find({
+      candidate: req.user._id,
+      status: 'completed',
+      passed: true
+    }).select('stack sector level interviewerScore');
+
+    const passedHuman = passedHumanRaw.map(h => ({
+      stack: h.stack,
+      sector: h.sector,
+      level: h.level,
+      totalScore: h.interviewerScore
+    }));
+
+    const allPassed = [...passedStd, ...passedAi, ...passedHuman];
+
+    // 4. Check eligibility for each open job
+    let matchedCount = 0;
+
+    for (const job of openJobs) {
+      if (!job.requirements || job.requirements.length === 0) {
+        // If a job has no requirements, assume eligible
+        matchedCount++;
+        continue;
+      }
+
+      let meetsAll = true;
+      for (const reqObj of job.requirements) {
+        // Determine which pool to check based on the required method
+        let searchPool = allPassed;
+        if (reqObj.method === 'Standard') searchPool = passedStd;
+        else if (reqObj.method === 'AI') searchPool = passedAi;
+        else if (reqObj.method === 'Human') searchPool = passedHuman;
+
+        const reqStackLower = (reqObj.stack || '').toLowerCase();
+        const minLevel = Number(reqObj.level) || 1;
+        const minScore = Number(reqObj.minScore) || 0;
+
+        // Find if candidate has ANY passed interview meeting this specific requirement in the allowed pool
+        const matchedInterview = searchPool.find(i => {
+          const stackMatch = (i.stack && i.stack.toLowerCase() === reqStackLower) ||
+                             (i.sector && i.sector.toLowerCase() === reqStackLower);
+          return stackMatch && i.level >= minLevel && (i.totalScore || 0) >= minScore;
+        });
+        
+        if (!matchedInterview) {
+          meetsAll = false;
+          break; // Optimization: fail fast if one requirement isn't met
+        }
+      }
+
+      if (meetsAll) {
+        matchedCount++;
+      }
+    }
+
+    res.status(200).json({ success: true, count: matchedCount });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { createJob, getJobs, getJob, updateJob, deleteJob, getMyJobs, applyToJob, getMyApplications, getJobApplications, updateApplicationStatus, getMatchedJobsCount };

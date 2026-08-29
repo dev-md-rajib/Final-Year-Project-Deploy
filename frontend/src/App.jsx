@@ -1,0 +1,179 @@
+import React, { Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
+
+// Auth pages
+import Login from './pages/auth/Login';
+import Register from './pages/auth/Register';
+
+// Layouts
+import DashboardLayout from './components/layout/DashboardLayout';
+
+// Candidate pages (lazy loaded)
+const CandidateDashboard = lazy(() => import('./pages/candidate/Dashboard'));
+const CandidateProfile = lazy(() => import('./pages/candidate/Profile'));
+const EditProfile = lazy(() => import('./pages/candidate/EditProfile'));
+const InterviewStart = lazy(() => import('./pages/candidate/InterviewStart'));
+const InterviewRoom = lazy(() => import('./pages/candidate/InterviewRoom'));
+const AIAgentInterviewRoom = lazy(() => import('./pages/candidate/AIAgentInterviewRoom'));
+const InterviewTeamRoom = lazy(() => import('./pages/candidate/InterviewTeamRoom'));
+const InterviewResult = lazy(() => import('./pages/candidate/InterviewResult'));
+const JobBoard = lazy(() => import('./pages/candidate/JobBoard'));
+const MyApplications = lazy(() => import('./pages/candidate/MyApplications'));
+const MyInterviews = lazy(() => import('./pages/candidate/MyInterviews'));
+const CandidateContests = lazy(() => import('./pages/candidate/Contests'));
+const ContestRoom = lazy(() => import('./pages/candidate/ContestRoom'));
+const CandidatePractice = lazy(() => import('./pages/candidate/CandidatePractice'));
+const CandidatePracticeRoom = lazy(() => import('./pages/candidate/CandidatePracticeRoom'));
+const CandidateMultiplayerRoom = lazy(() => import('./pages/candidate/CandidateMultiplayerRoom'));
+
+// Recruiter pages (lazy loaded)
+const RecruiterDashboard = lazy(() => import('./pages/recruiter/Dashboard'));
+const RecruiterProfile = lazy(() => import('./pages/recruiter/Profile'));
+const PostJob = lazy(() => import('./pages/recruiter/PostJob'));
+const MyJobs = lazy(() => import('./pages/recruiter/MyJobs'));
+const CandidateSearch = lazy(() => import('./pages/recruiter/CandidateSearch'));
+const CandidateView = lazy(() => import('./pages/recruiter/CandidateView'));
+const JobApplications = lazy(() => import('./pages/recruiter/JobApplications'));
+const RecruiterContestList = lazy(() => import('./pages/recruiter/ContestList'));
+const CreateContest = lazy(() => import('./pages/recruiter/CreateContest'));
+const ContestResults = lazy(() => import('./pages/recruiter/ContestResults'));
+
+// Admin pages (lazy loaded)
+const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
+const LevelManager = lazy(() => import('./pages/admin/LevelManager'));
+const QuestionBank = lazy(() => import('./pages/admin/QuestionBank'));
+const UserManager = lazy(() => import('./pages/admin/UserManager'));
+const AdminReports = lazy(() => import('./pages/admin/Reports'));
+
+// Shared pages
+const Messages = lazy(() => import('./pages/shared/Messages'));
+const RecruiterPublicProfile = lazy(() => import('./pages/shared/RecruiterPublicProfile'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+
+// Interviewer pages
+const InterviewerDashboard = lazy(() => import('./pages/interviewer/Dashboard'));
+const InterviewerProfile = lazy(() => import('./pages/interviewer/Profile'));
+const InterviewerAssignments = lazy(() => import('./pages/interviewer/Assignments'));
+const InterviewerInterviewRoom = lazy(() => import('./pages/interviewer/InterviewerInterviewRoom'));
+
+const LoadingSpinner = () => (
+  <div className="min-h-screen flex items-center justify-center bg-dark-900">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-12 h-12 border-4 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
+      <p className="text-gray-400 text-sm">Loading...</p>
+    </div>
+  </div>
+);
+
+// Protected route component
+const ProtectedRoute = ({ children, allowedRoles }) => {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingSpinner />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to={getDefaultRoute(user.role)} replace />;
+  }
+  return children;
+};
+
+const getDefaultRoute = (role) => {
+  if (role === 'ADMIN') return '/admin';
+  if (role === 'RECRUITER') return '/recruiter';
+  if (role === 'INTERVIEWER') return '/interviewer';
+  return '/candidate';
+};
+
+// Public route (redirect if logged in)
+const PublicRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingSpinner />;
+  if (user) return <Navigate to={getDefaultRoute(user.role)} replace />;
+  return children;
+};
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Suspense fallback={<LoadingSpinner />}>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/" element={<Navigate to="/login" replace />} />
+              <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+              <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+
+              {/* Candidate routes */}
+              <Route path="/candidate" element={<ProtectedRoute allowedRoles={['CANDIDATE']}><DashboardLayout /></ProtectedRoute>}>
+                <Route index element={<CandidateDashboard />} />
+                <Route path="profile" element={<CandidateProfile />} />
+                <Route path="profile/edit" element={<EditProfile />} />
+                <Route path="recruiters/:id" element={<RecruiterPublicProfile />} />
+                <Route path="interview" element={<InterviewStart />} />
+                <Route path="interview/ai-agent/:id" element={<AIAgentInterviewRoom />} />
+                <Route path="interview/team" element={<InterviewTeamRoom />} />
+                <Route path="interview/:id" element={<InterviewRoom />} />
+                <Route path="interview/:id/result" element={<InterviewResult />} />
+                <Route path="jobs" element={<JobBoard />} />
+                <Route path="applications" element={<MyApplications />} />
+                <Route path="history" element={<MyInterviews />} />
+                <Route path="messages" element={<Messages />} />
+                <Route path="contests" element={<CandidateContests />} />
+                <Route path="contests/:id/attempt" element={<ContestRoom />} />
+                {/* Practice */}
+                <Route path="practice" element={<CandidatePractice />} />
+                <Route path="practice/:id" element={<CandidatePracticeRoom />} />
+                <Route path="multiplayer/:id" element={<CandidateMultiplayerRoom />} />
+              </Route>
+
+              {/* Recruiter routes */}
+              <Route path="/recruiter" element={<ProtectedRoute allowedRoles={['RECRUITER']}><DashboardLayout /></ProtectedRoute>}>
+                <Route index element={<RecruiterDashboard />} />
+                <Route path="profile" element={<RecruiterProfile />} />
+                <Route path="recruiters/:id" element={<RecruiterPublicProfile />} />
+                <Route path="jobs/new" element={<PostJob />} />
+                <Route path="jobs" element={<MyJobs />} />
+                <Route path="jobs/:id/edit" element={<PostJob />} />
+                <Route path="jobs/:id/applications" element={<JobApplications />} />
+                <Route path="candidates" element={<CandidateSearch />} />
+                <Route path="candidates/:id" element={<CandidateView />} />
+                <Route path="messages" element={<Messages />} />
+                <Route path="contests" element={<RecruiterContestList />} />
+                <Route path="contests/new" element={<CreateContest />} />
+                <Route path="contests/:id/edit" element={<CreateContest />} />
+                <Route path="contests/:id/results" element={<ContestResults />} />
+              </Route>
+
+              {/* Admin routes */}
+              <Route path="/admin" element={<ProtectedRoute allowedRoles={['ADMIN']}><DashboardLayout /></ProtectedRoute>}>
+                <Route index element={<AdminDashboard />} />
+                <Route path="levels" element={<LevelManager />} />
+                <Route path="questions" element={<QuestionBank />} />
+                <Route path="users" element={<UserManager />} />
+                <Route path="users/:id" element={<CandidateView />} />
+                <Route path="candidates" element={<CandidateSearch />} />
+                <Route path="candidates/:id" element={<CandidateView />} />
+                <Route path="recruiters/:id" element={<RecruiterPublicProfile />} />
+                <Route path="reports" element={<AdminReports />} />
+                <Route path="messages" element={<Messages />} />
+              </Route>
+
+              {/* Interviewer routes */}
+              <Route path="/interviewer" element={<ProtectedRoute allowedRoles={['INTERVIEWER']}><DashboardLayout /></ProtectedRoute>}>
+                <Route index element={<InterviewerDashboard />} />
+                <Route path="dashboard" element={<InterviewerDashboard />} />
+                <Route path="assignments" element={<InterviewerAssignments />} />
+                <Route path="profile" element={<InterviewerProfile />} />
+                <Route path="interview/:id" element={<InterviewerInterviewRoom />} />
+              </Route>
+
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
+  );
+}
